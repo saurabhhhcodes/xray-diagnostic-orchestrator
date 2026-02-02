@@ -233,6 +233,31 @@ if uploaded_file is not None:
                             st.warning(f"### ⚠️ Attention Needed: {top_label}")
                             st.write(PATIENT_FRIENDLY_DESCRIPTIONS.get(top_label, "Please consult a doctor."))
                             st.progress(top_score)
+                            st.info("ℹ️ **Methodology**: Scores are fused from NIH, PadChest, and RSNA Specialists.")
+
+                            # --- WEB VERIFICATION ---
+                            st.markdown("### 🌐 External Verification")
+                            search_query = f"{top_label} X-Ray radiology radiopedia"
+                            search_url = f"https://www.google.com/search?q={search_query.replace(' ', '+')}"
+                            
+                            st.markdown(f"""
+                                <a href="{search_url}" target="_blank">
+                                    <button style="
+                                        background-color: #4CAF50;
+                                        color: white;
+                                        padding: 10px 24px;
+                                        border: none;
+                                        border-radius: 4px;
+                                        cursor: pointer;
+                                        font-size: 16px;
+                                        width: 100%;">
+                                        🔍 Verify '{top_label}' on Web
+                                    </button>
+                                </a>
+                                <p style="font-size:0.8em; color:gray; text-align:center; margin-top:5px;">
+                                    Opens a medical search for reference images.
+                                </p>
+                            """, unsafe_allow_html=True)
                             st.info("We recommend sharing this result with a healthcare professional for a check-up.")
 
             except Exception as e:
