@@ -4,3 +4,7 @@ numpy
 pillow
 opencv-python-headless
 matplotlib
+openai
+python-dotenv
+google-generativeai
+groq

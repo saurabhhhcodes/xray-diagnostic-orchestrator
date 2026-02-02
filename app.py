@@ -6,6 +6,7 @@ from PIL import Image
 import tempfile
 import matplotlib.cm as cm
 from xray_service import NIHPredictor, RSNAPredictor, PadChestPredictor
+from ai_agent import analyze_xray_with_agent, get_agent_findings_summary
 
 st.set_page_config(page_title="Pro X-Ray Diagnostic", page_icon="🩻", layout="wide")
 
@@ -259,6 +260,51 @@ if uploaded_file is not None:
                                 </p>
                             """, unsafe_allow_html=True)
                             st.info("We recommend sharing this result with a healthcare professional for a check-up.")
+                        
+                        # --- AI AGENT ANALYSIS (Optional - only shows when available) ---
+                        try:
+                            agent_result = analyze_xray_with_agent(tmp_path)
+                            
+                            if agent_result.get("success"):
+                                st.markdown("---")
+                                provider = agent_result.get("provider", "AI")
+                                st.markdown(f"### 🤖 AI Cross-Validation ({provider})")
+                                
+                                agent_data = agent_result.get("data", {})
+                                findings = agent_data.get("findings", [])
+                                
+                                if findings:
+                                    st.markdown("**AI Agent detected the following conditions:**")
+                                    for f in findings:
+                                        condition = f.get("condition", "Unknown")
+                                        confidence = f.get("confidence", "Unknown")
+                                        location = f.get("location", "")
+                                        explanation = f.get("explanation", "")
+                                        
+                                        # Color code by confidence
+                                        if confidence.lower() == "high":
+                                            st.error(f"**{condition}** - {confidence} Confidence")
+                                        elif confidence.lower() == "medium":
+                                            st.warning(f"**{condition}** - {confidence} Confidence")
+                                        else:
+                                            st.info(f"**{condition}** - {confidence} Confidence")
+                                        
+                                        if location:
+                                            st.caption(f"📍 Location: {location}")
+                                        if explanation:
+                                            st.caption(f"_{explanation}_")
+                                    
+                                    if agent_data.get("overall_impression"):
+                                        st.markdown(f"**Overall:** {agent_data['overall_impression']}")
+                                    
+                                    if agent_data.get("recommendation"):
+                                        st.success(f"**Recommendation:** {agent_data['recommendation']}")
+                                elif "raw_analysis" in agent_data:
+                                    st.markdown(agent_data["raw_analysis"])
+                                else:
+                                    st.success("AI Agent: No significant abnormalities detected.")
+                        except Exception:
+                            pass  # Silently skip AI Agent if unavailable
 
             except Exception as e:
                 st.error(f"Analysis failed: {e}")
