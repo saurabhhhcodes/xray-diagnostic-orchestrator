@@ -40,3 +40,17 @@ venv/
 
 # OS
 .DS_Store
+
+# Large Models
+*.h5
+*.keras
+*.tflite
+*.onnx
+
+# Data and Images
+*.png
+*.jpg
+*.jpeg
+chest_model_temp/
+spine_model_temp/
+test_images/

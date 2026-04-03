@@ -1,6 +1,6 @@
 """
 AI Agent for X-Ray Analysis using multiple Vision LLMs.
-Priority: Kimi AI -> Groq LLaVA -> Gemini -> OpenAI
+Priority: SambaNova -> Groq -> Kimi -> Gemini -> OpenAI
 """
 import os
 import base64
@@ -42,38 +42,52 @@ def encode_image_to_base64(image_path):
     with open(image_path, "rb") as image_file:
         return base64.b64encode(image_file.read()).decode("utf-8")
 
-def analyze_with_kimi(image_path):
-    """Use Kimi AI (Moonshot) vision model."""
+def analyze_with_sambanova(image_path):
+    """Use SambaNova API with Llama 3.2 Vision."""
     from openai import OpenAI
     
     client = OpenAI(
-        api_key=os.getenv("KIMI_API_KEY"),
-        base_url="https://api.moonshot.cn/v1"
+        api_key=os.getenv("SAMBANOVA_API_KEY"),
+        base_url="https://api.sambanova.ai/v1"
     )
     
     base64_image = encode_image_to_base64(image_path)
     ext = os.path.splitext(image_path)[1].lower()
     mime_type = "image/png" if ext == ".png" else "image/jpeg"
     
-    response = client.chat.completions.create(
-        model="moonshot-v1-8k-vision-preview",  # Kimi vision model
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": SYSTEM_PROMPT + "\n\nPlease analyze this chest X-ray and provide your findings in the specified JSON format."},
-                    {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{base64_image}"}}
-                ]
-            }
-        ],
-        max_tokens=1000,
-        temperature=0.2
-    )
+    # Try different model names
+    models_to_try = [
+        "Llama-3.2-11B-Vision-Instruct",
+        "llama-3.2-11b-vision-instruct", 
+        "Meta-Llama-3.2-11B-Vision-Instruct"
+    ]
     
-    return response.choices[0].message.content
+    last_error = None
+    for model_name in models_to_try:
+        try:
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": SYSTEM_PROMPT + "\n\nPlease analyze this chest X-ray and provide your findings in the specified JSON format."},
+                            {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{base64_image}"}}
+                        ]
+                    }
+                ],
+                max_tokens=1000,
+                temperature=0.2
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            last_error = e
+            continue
+    
+    raise last_error
 
 def analyze_with_groq(image_path):
-    """Use Groq with LLaVA vision model (FREE)."""
+    """Use Groq with Llama vision model."""
     from groq import Groq
     
     client = Groq(api_key=os.getenv("GROQ_API_KEY"))
@@ -82,22 +96,36 @@ def analyze_with_groq(image_path):
     ext = os.path.splitext(image_path)[1].lower()
     mime_type = "image/png" if ext == ".png" else "image/jpeg"
     
-    response = client.chat.completions.create(
-        model="llama-3.2-90b-vision-preview",
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": SYSTEM_PROMPT + "\n\nPlease analyze this chest X-ray and provide your findings in the specified JSON format."},
-                    {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{base64_image}"}}
-                ]
-            }
-        ],
-        max_tokens=1000,
-        temperature=0.2
-    )
+    # Try current model names
+    models_to_try = [
+        "llama-3.2-11b-vision-preview",
+        "llava-v1.5-7b-4096-preview",
+        "meta-llama/llama-3.2-11b-vision-instruct"
+    ]
     
-    return response.choices[0].message.content
+    last_error = None
+    for model_name in models_to_try:
+        try:
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": SYSTEM_PROMPT + "\n\nPlease analyze this chest X-ray and provide your findings in the specified JSON format."},
+                            {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{base64_image}"}}
+                        ]
+                    }
+                ],
+                max_tokens=1000,
+                temperature=0.2
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            last_error = e
+            continue
+    
+    raise last_error
 
 def analyze_with_gemini(image_path):
     """Use Google Gemini Vision API."""
@@ -137,7 +165,7 @@ def analyze_with_openai(image_path):
 def analyze_xray_with_agent(image_path):
     """
     Analyze an X-ray image using AI Vision.
-    Priority: Kimi -> Groq (free) -> Gemini -> OpenAI
+    Priority: SambaNova -> Groq -> Gemini -> OpenAI
     """
     import json
     import re
@@ -148,8 +176,8 @@ def analyze_xray_with_agent(image_path):
     
     # Priority order of providers
     providers = [
-        ("KIMI_API_KEY", analyze_with_kimi, "Kimi AI"),
-        ("GROQ_API_KEY", analyze_with_groq, "Llama 3.2 Vision (Groq)"),
+        ("SAMBANOVA_API_KEY", analyze_with_sambanova, "Llama 3.2 Vision (SambaNova)"),
+        ("GROQ_API_KEY", analyze_with_groq, "Llama Vision (Groq)"),
         ("GEMINI_API_KEY", analyze_with_gemini, "Gemini"),
         ("OPENAI_API_KEY", analyze_with_openai, "GPT-4"),
     ]

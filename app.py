@@ -5,7 +5,8 @@ import numpy as np
 from PIL import Image
 import tempfile
 import matplotlib.cm as cm
-from xray_service import NIHPredictor, RSNAPredictor, PadChestPredictor
+# from xray_service import NIHPredictor, RSNAPredictor, PadChestPredictor # Removed
+
 from ai_agent import analyze_xray_with_agent, get_agent_findings_summary
 
 st.set_page_config(page_title="Pro X-Ray Diagnostic", page_icon="🩻", layout="wide")
@@ -100,6 +101,102 @@ def overlay_heatmap(img_path, heatmap):
     superimposed_img = np.uint8(np.clip(superimposed_img, 0, 255))
     return superimposed_img
 
+# --- RISK STRATIFICATION ---
+DISEASE_SEVERITY = {
+    'Pneumothorax': 'critical', 'Pneumonia': 'critical', 'Effusion': 'critical',
+    'Mass': 'significant', 'Nodule': 'significant', 'Consolidation': 'significant',
+    'Infiltration': 'significant', 'Edema': 'significant',
+    'Cardiomegaly': 'moderate', 'Atelectasis': 'moderate', 'Fibrosis': 'moderate',
+    'Pleural_Thickening': 'minor', 'Emphysema': 'minor', 'Hernia': 'minor',
+    'No Finding': 'normal', 'Normal': 'normal'
+}
+
+def calculate_risk_assessment(predictions):
+    critical_findings, significant_findings, moderate_findings = [], [], []
+    for disease, score in predictions.items():
+        severity = DISEASE_SEVERITY.get(disease, 'minor')
+        if score > 0.5 and severity == 'critical':
+            critical_findings.append((disease, score))
+        elif score > 0.4 and severity == 'significant':
+            significant_findings.append((disease, score))
+        elif score > 0.3 and severity == 'moderate':
+            moderate_findings.append((disease, score))
+    if critical_findings:
+        return "CRITICAL", critical_findings
+    elif significant_findings:
+        return "HIGH", significant_findings
+    elif moderate_findings:
+        return "MODERATE", moderate_findings
+    return "LOW", []
+
+def display_comprehensive_findings(predictions, mode="professional"):
+    risk_level, key_findings = calculate_risk_assessment(predictions)
+    sorted_preds = dict(sorted(predictions.items(), key=lambda x: x[1], reverse=True))
+    
+    if mode == "professional":
+        st.markdown("### 📊 Comprehensive Analysis")
+        risk_colors = {"CRITICAL": "🔴", "HIGH": "🟠", "MODERATE": "🟡", "LOW": "🟢"}
+        st.markdown(f"**Overall Risk**: {risk_colors.get(risk_level, '⚪')} **{risk_level}**")
+        if key_findings:
+            st.markdown("**Key Findings:**")
+            for disease, score in key_findings:
+                st.markdown(f"- **{disease}**: {score*100:.1f}%")
+        st.markdown("---")
+        st.markdown("### All Detected Conditions")
+        critical, significant, moderate, minor = [], [], [], []
+        for disease, score in sorted_preds.items():
+            severity = DISEASE_SEVERITY.get(disease, 'minor')
+            if severity == 'critical' and score > 0.1:
+                critical.append((disease, score))
+            elif severity == 'significant' and score > 0.1:
+                significant.append((disease, score))
+            elif severity == 'moderate' and score > 0.1:
+                moderate.append((disease, score))
+            elif score > 0.05:
+                minor.append((disease, score))
+        if critical:
+            st.markdown("#### 🔴 Critical Findings")
+            for disease, score in critical:
+                with st.expander(f"{disease}: {score*100:.1f}%", expanded=(score > 0.5)):
+                    st.progress(score)
+                    st.caption(DISEASE_DETAILS.get(disease, ""))
+        if significant:
+            st.markdown("#### 🟠 Significant Findings")
+            for disease, score in significant:
+                with st.expander(f"{disease}: {score*100:.1f}%", expanded=(score > 0.5)):
+                    st.progress(score)
+                    st.caption(DISEASE_DETAILS.get(disease, ""))
+        if moderate:
+            st.markdown("#### 🟡 Moderate Findings")
+            for disease, score in moderate:
+                with st.expander(f"{disease}: {score*100:.1f}%"):
+                    st.progress(score)
+                    st.caption(DISEASE_DETAILS.get(disease, ""))
+        if minor:
+            with st.expander("📋 Other Observations"):
+                for disease, score in minor:
+                    st.markdown(f"- **{disease}**: {score*100:.1f}%")
+    else:
+        top_disease = list(sorted_preds.keys())[0]
+        top_score = sorted_preds[top_disease]
+        if top_disease in ["Normal", "No Finding"] and top_score > 0.5:
+            st.balloons()
+            st.success("### ✅ Likely Healthy")
+            st.write(PATIENT_FRIENDLY_DESCRIPTIONS.get("Normal"))
+        else:
+            if risk_level == "CRITICAL":
+                st.error(f"### 🚨 Critical: {top_disease}")
+            elif risk_level == "HIGH":
+                st.warning(f"### ⚠️ Attention Needed: {top_disease}")
+            else:
+                st.info(f"### ℹ️ Finding: {top_disease}")
+            st.write(PATIENT_FRIENDLY_DESCRIPTIONS.get(top_disease, "Please consult a doctor."))
+            st.progress(top_score)
+            if key_findings and len(key_findings) > 1:
+                st.markdown("**Additional findings detected:**")
+                for disease, score in key_findings[1:3]:
+                    st.markdown(f"- {disease} ({score*100:.0f}%)")
+
 from xray_service import DiagnosticRouter
 
 st.title("🩻 Sahayak Diagnostic Orchestrator")
@@ -111,8 +208,23 @@ user_mode = st.sidebar.radio("User Mode", ["Patient", "Healthcare Professional"]
 st.sidebar.title("⚙️ Analysis Settings")
 body_part = st.sidebar.selectbox(
     "Select Body Part / Scan Type",
-    ["Chest X-Ray", "Brain MRI (Coming Soon)", "Bone Fracture (Coming Soon)", "Retinal Scan (Coming Soon)"]
+    ["Chest X-Ray", "Brain MRI (Coming Soon)", "Cervical Spine Scan", "Retinal Scan (Coming Soon)"]
 )
+
+engine_mode = st.sidebar.radio(
+    "AI Engine",
+    ["Legacy Ensemble (Recommended)", "Unified SOTA (Pneumonia Only)"],
+    help="Legacy: Comprehensive 15-disease detection. Unified: Binary Pneumonia classifier with metadata."
+)
+
+# Metadata for Unified Model
+meta_data = {}
+if "Unified" in engine_mode:
+    st.sidebar.markdown("### Patient Data")
+    age = st.sidebar.number_input("Patient Age", min_value=0, max_value=100, value=50)
+    gender = st.sidebar.selectbox("Gender", ["Male", "Female"])
+    meta_data = {"age": age, "gender": gender}
+
 
 # Initialize Router
 @st.cache_resource
@@ -177,9 +289,12 @@ if uploaded_file is not None:
                 # Map selectbox string to simple key
                 part_key = "Chest"
                 if "Brain" in body_part: part_key = "Brain"
-                elif "Bone" in body_part: part_key = "Bone"
+                elif "Spine" in body_part: part_key = "Spine"
                 
-                result = router.route_and_predict(tmp_path, body_part=part_key)
+                # Determine method
+                method = "unified" if "Unified" in engine_mode else "legacy"
+                
+                result = router.route_and_predict(tmp_path, body_part=part_key, method=method, metadata=meta_data)
                 
                 if "error" in result:
                     st.error(f"Router Error: {result['error']}")
@@ -191,77 +306,61 @@ if uploaded_file is not None:
                     if user_mode == "Healthcare Professional":
                         st.caption(f"Diagnosed by: {specialist_name}")
                 
-                    # RENDER RESULTS
-                    if user_mode == "Healthcare Professional":
+                    # ---- SPINE RESULTS ----
+                    if part_key == "Spine":
+                        st.markdown("### 🦴 Cervical Spine Fracture Analysis")
+                        st.markdown("*Per-vertebra fracture probability — EfficientNetV2-B3 + BiGRU*")
+                        st.markdown("---")
+                        
+                        SPINE_LABELS_ORDERED = ['C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7']
+                        CLASS_WEIGHTS = {'C1': 10.0, 'C2': 5.9, 'C3': 10.0, 
+                                         'C4': 10.0, 'C5': 10.0, 'C6': 6.2, 'C7': 4.1}
+                        
+                        overall_score = preds.get('Patient_Overall', 0.0)
+                        if overall_score > 0.6:
+                            st.error(f"🚨 **Overall Patient Status: HIGH RISK** ({overall_score*100:.1f}%)")
+                        elif overall_score > 0.35:
+                            st.warning(f"⚠️ **Overall Patient Status: MODERATE RISK** ({overall_score*100:.1f}%)")
+                        else:
+                            st.success(f"✅ **Overall Patient Status: LOW RISK** ({overall_score*100:.1f}%)")
+                        
+                        st.markdown("#### Per-Vertebra Probability")
+                        cols_spine = st.columns(7)
+                        for i, label in enumerate(SPINE_LABELS_ORDERED):
+                            score = preds.get(label, 0.0)
+                            weight = CLASS_WEIGHTS.get(label, 1.0)
+                            with cols_spine[i]:
+                                color = "🔴" if score > 0.6 else ("🟡" if score > 0.35 else "🟢")
+                                st.metric(label=f"{color} {label}", value=f"{score*100:.0f}%")
+                                st.progress(float(score))
+                                st.caption(f"w={weight}")
+                        
+                        st.markdown("---")
+                        st.info("💡 High-probability vertebrae are flagged for urgent radiologist review. "
+                                "Class weights reflect anatomical fracture rarity.")
+                        
+                        # Grad-CAM overlay if available
+                        if np.max(heatmap_data) > 0 and user_mode == "Healthcare Professional":
+                            overlay_img = overlay_heatmap(tmp_path, heatmap_data)
+                            heatmap_placeholder.image(overlay_img, caption="Attention Map", use_container_width=True)
+
+                    # ---- CHEST RESULTS ----
+                    elif user_mode == "Healthcare Professional":
                         if np.max(heatmap_data) > 0:
                             overlay_img = overlay_heatmap(tmp_path, heatmap_data)
-                            heatmap_placeholder.image(overlay_img, caption=f"Attention Map", width="stretch")
+                            heatmap_placeholder.image(overlay_img, caption="Attention Map", use_container_width=True)
                         else:
                             heatmap_placeholder.info("Heatmap not available for this model.")
 
-                        user_col = col3
-                        
-                        sort_p = dict(sorted(preds.items(), key=lambda item: item[1], reverse=True))
-                        top_l = list(sort_p.keys())[0]
-                        top_s = sort_p[top_l]
-                        
-                        with user_col:
-                            if top_l == "Normal" or (top_l == "No Finding" and top_s > 0.5):
-                                    st.success(f"**LIKELY NORMAL**\n\nConfidence: {top_s*100:.1f}%")
-                            else:
-                                    st.error(f"**FINDING: {top_l.upper()}**\n\nConfidence: {top_s*100:.1f}%")
-                            st.markdown("---")
-                            
-                            c = 0
-                            for l, s in sort_p.items():
-                                if c >= 4: break
-                                with st.expander(f"{l}: {s*100:.1f}%"):
-                                    st.progress(s)
-                                    st.caption(DISEASE_DETAILS.get(l, ""))
-                                c+=1
+                        with col3:
+                            display_comprehensive_findings(preds, mode="professional")
 
                     else:
-                        # PATIENT MODE RESULT
-                        sorted_preds = dict(sorted(preds.items(), key=lambda item: item[1], reverse=True))
-                        top_label = list(sorted_preds.keys())[0]
-                        top_score = sorted_preds[top_label]
+                        # PATIENT MODE RESULT (Chest)
+                        display_comprehensive_findings(preds, mode="patient")
+                        st.info("We recommend sharing this result with a healthcare professional for a check-up.")
                         
-                        if top_label == "Normal" or (top_label == "No Finding" and top_score > 0.5):
-                            st.canvas = st.balloons()
-                            st.success("### ✅ Likely Healthy")
-                            st.write(PATIENT_FRIENDLY_DESCRIPTIONS.get("Normal"))
-                        else:
-                            st.warning(f"### ⚠️ Attention Needed: {top_label}")
-                            st.write(PATIENT_FRIENDLY_DESCRIPTIONS.get(top_label, "Please consult a doctor."))
-                            st.progress(top_score)
-                            st.info("ℹ️ **Methodology**: Scores are fused from NIH, PadChest, and RSNA Specialists.")
-
-                            # --- WEB VERIFICATION ---
-                            st.markdown("### 🌐 External Verification")
-                            search_query = f"{top_label} X-Ray radiology radiopedia"
-                            search_url = f"https://www.google.com/search?q={search_query.replace(' ', '+')}"
-                            
-                            st.markdown(f"""
-                                <a href="{search_url}" target="_blank">
-                                    <button style="
-                                        background-color: #4CAF50;
-                                        color: white;
-                                        padding: 10px 24px;
-                                        border: none;
-                                        border-radius: 4px;
-                                        cursor: pointer;
-                                        font-size: 16px;
-                                        width: 100%;">
-                                        🔍 Verify '{top_label}' on Web
-                                    </button>
-                                </a>
-                                <p style="font-size:0.8em; color:gray; text-align:center; margin-top:5px;">
-                                    Opens a medical search for reference images.
-                                </p>
-                            """, unsafe_allow_html=True)
-                            st.info("We recommend sharing this result with a healthcare professional for a check-up.")
-                        
-                        # --- AI AGENT ANALYSIS (Optional - only shows when available) ---
+                        # --- AI AGENT ANALYSIS ---
                         try:
                             agent_result = analyze_xray_with_agent(tmp_path)
                             
@@ -281,7 +380,6 @@ if uploaded_file is not None:
                                         location = f.get("location", "")
                                         explanation = f.get("explanation", "")
                                         
-                                        # Color code by confidence
                                         if confidence.lower() == "high":
                                             st.error(f"**{condition}** - {confidence} Confidence")
                                         elif confidence.lower() == "medium":
@@ -308,6 +406,8 @@ if uploaded_file is not None:
 
             except Exception as e:
                 st.error(f"Analysis failed: {e}")
+                import traceback
+                st.code(traceback.format_exc())
             finally:
                 if os.path.exists(tmp_path):
                     os.remove(tmp_path)

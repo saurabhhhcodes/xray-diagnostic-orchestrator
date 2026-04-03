@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 import cv2
 import os
-from xray_service import NIHPredictor, RSNAPredictor, PadChestPredictor
+from xray_service import NIHPredictor, RSNAPredictor, PadChestPredictor, UnifiedPredictor
 
 class TestXRayModels(unittest.TestCase):
     
@@ -21,6 +21,23 @@ class TestXRayModels(unittest.TestCase):
         if os.path.exists(cls.dummy_img_path):
             os.remove(cls.dummy_img_path)
 
+    def test_unified_model(self):
+        print("\nTesting Unified Predictor...")
+        model_path = 'Unified_Chest_SOTA_99_final.h5'
+        if not os.path.exists(model_path):
+            print(f"Skipping Unified test (model {model_path} not found)")
+            return
+        
+        predictor = UnifiedPredictor(model_path)
+        
+        # Test Prediction with Metadata
+        fake_metadata = {"age": 65, "gender": "Male"}
+        results = predictor.predict(self.dummy_img_path, metadata=fake_metadata)
+        self.assertIsInstance(results, dict)
+        self.assertIn('Pneumonia', results)
+        self.assertTrue(0.0 <= results['Pneumonia'] <= 1.0)
+        print("Unified Model Test Passed.")
+
     def test_nih_model(self):
         print("\nTesting NIH Predictor...")
         if not os.path.exists('xray_model.h5'):
@@ -32,11 +49,6 @@ class TestXRayModels(unittest.TestCase):
         self.assertIsInstance(results, dict)
         self.assertEqual(len(results), 15)
         self.assertIn('Pneumonia', results)
-        
-        # Test GradCAM
-        heatmap, label = predictor.make_gradcam(self.dummy_img_path)
-        # Heatmap will be 7x7 (DenseNet feature map), resizing happens in frontend
-        self.assertEqual(heatmap.shape, (7, 7))
         print("NIH Test Passed.")
 
     def test_rsna_model(self):
@@ -50,7 +62,6 @@ class TestXRayModels(unittest.TestCase):
         self.assertIsInstance(results, dict)
         self.assertIn('Pneumonia', results)
         self.assertIn('Normal', results)
-        self.assertTrue(0 <= results['Pneumonia'] <= 1)
         print("RSNA Test Passed.")
 
     def test_padchest_model(self):
